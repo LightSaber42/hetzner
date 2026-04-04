@@ -21,6 +21,28 @@ for cmd in git node npm python3 docker railway codex tmux jq curl unzip zip bwra
 done
 echo
 
+echo "Telegram Codex service files"
+if [[ -f "${HOME}/.config/systemd/user/telegram-codex.service" ]]; then
+  echo "[ok] ~/.config/systemd/user/telegram-codex.service"
+else
+  echo "[missing] ~/.config/systemd/user/telegram-codex.service"
+fi
+
+if [[ -f "${HOME}/.config/coding/telegram-codex.env" ]]; then
+  echo "[ok] ~/.config/coding/telegram-codex.env"
+else
+  echo "[missing] ~/.config/coding/telegram-codex.env"
+fi
+echo
+
+echo "Workspace root"
+if [[ -d "${HOME}/Coding" ]]; then
+  echo "[ok] ~/Coding"
+else
+  echo "[missing] ~/Coding"
+fi
+echo
+
 echo "Versions"
 git --version || true
 node --version || true
@@ -46,3 +68,8 @@ else
   echo "docker_user_access_failed"
   echo "If this is a fresh machine, re-login after being added to the docker group."
 fi
+echo
+
+echo "User service"
+systemctl --user is-enabled telegram-codex.service 2>/dev/null || true
+systemctl --user is-active telegram-codex.service 2>/dev/null || true

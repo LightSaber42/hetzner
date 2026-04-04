@@ -9,9 +9,11 @@ PROFILE="${HOME_DIR}/.profile"
 SSH_DIR="${HOME_DIR}/.ssh"
 GITCONFIG="${HOME_DIR}/.gitconfig"
 TMUXCONF="${HOME_DIR}/.tmux.conf"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 mkdir -p "${HOME_DIR}/.local/bin" "${HOME_DIR}/.local/lib" "${SSH_DIR}"
 chmod 700 "${SSH_DIR}"
+mkdir -p "${HOME_DIR}/Coding"
 
 npm config set prefix "${NPM_GLOBAL_DIR}"
 
@@ -76,6 +78,8 @@ set -g mouse on
 EOF
 fi
 
+bash "${REPO_ROOT}/scripts/install_telegram_codex_service.sh"
+
 cat <<'EOF'
 User bootstrap completed.
 
@@ -90,6 +94,12 @@ Manual follow-up:
    codex
    railway login
    tailscale up
-5. If you use Docker as a non-root user, verify after re-login:
+5. Fill in ~/.config/coding/telegram-codex.env if you want the Telegram Codex bridge enabled, then start it:
+   systemctl --user start telegram-codex.service
+6. Clone or move working repos under ~/Coding:
+   ~/Coding/hetzner
+   ~/Coding/notea
+   ~/Coding/unitc
+7. If you use Docker as a non-root user, verify after re-login:
    docker ps
 EOF

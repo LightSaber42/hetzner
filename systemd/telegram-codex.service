@@ -1,0 +1,15 @@
+[Unit]
+Description=Telegram to Codex bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Coding/hetzner
+EnvironmentFile=%h/.config/coding/telegram-codex.env
+ExecStart=%h/Coding/hetzner/scripts/run_telegram_codex_bridge.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -36,25 +36,25 @@ sudo usermod -aG sudo developer
 6. Copy this repo to the machine:
 
 ```bash
-sudo mkdir -p /home/developer/hetzner
+sudo mkdir -p /home/developer/Coding
 sudo chown -R developer:developer /home/developer
 ```
 
-Then clone or sync the repo into `/home/developer/hetzner`.
+Then clone or sync the repo into `/home/developer/Coding/hetzner`.
 
 ## Phase 2: Recreate the Base Environment
 
 As `root`:
 
 ```bash
-cd /home/developer/hetzner
+cd /home/developer/Coding/hetzner
 sudo bash scripts/bootstrap_root.sh
 ```
 
 As `developer`:
 
 ```bash
-cd /home/developer/hetzner
+cd /home/developer/Coding/hetzner
 bash scripts/bootstrap_user.sh
 ```
 
@@ -67,6 +67,16 @@ bash scripts/bootstrap_user.sh
 ```
 
 Open a new shell after bootstrap so `PATH` and `docker` group membership apply.
+
+If you need Azure CLI on the new host, note that on the source machine as of `2026-04-03`, `azure-cli` was not available from the configured apt repositories. The fallback that worked there was:
+
+```bash
+sudo apt-get install -y python3-pip
+python3 -m pip install --user azure-cli
+~/.local/bin/az version
+```
+
+If `~/.local/bin` is on `PATH`, `az version` should work directly after opening a new shell.
 
 ## Phase 3: Restore Identity and Access
 
@@ -133,8 +143,11 @@ If this machine needs Cloudflare Tunnel, re-authenticate and re-create the tunne
 Clone working repos fresh:
 
 ```bash
-cd /home/developer
-git clone git@github.com:ORG/REPO.git
+mkdir -p /home/developer/Coding
+cd /home/developer/Coding
+git clone git@github.com:ORG/hetzner.git
+git clone git@github.com:ORG/notea.git
+git clone git@github.com:ORG/unitc.git
 ```
 
 Only copy local uncommitted work if you actually need it. Preferred order:
@@ -148,7 +161,7 @@ Only copy local uncommitted work if you actually need it. Preferred order:
 Run:
 
 ```bash
-cd /home/developer/hetzner
+cd /home/developer/Coding/hetzner
 bash scripts/verify_setup.sh
 ```
 
@@ -166,6 +179,7 @@ codex --version
 - Provision EC2 Ubuntu 24.04
 - Create `developer` user
 - Sync this `hetzner` repo
+- Put working repos under `/home/developer/Coding`
 - Run `scripts/bootstrap_root.sh`
 - Run `scripts/bootstrap_user.sh`
 - Re-login
@@ -184,6 +198,7 @@ Observed here:
 - Docker comes from Docker's apt repo
 - `cloudflared` and `tailscale` are installed from vendor repos
 - `bubblewrap` and `kernel.apparmor_restrict_unprivileged_userns=0` are required for Codex sandboxing on Ubuntu
+- `azure-cli` was not available from the configured apt repositories on `2026-04-03`; the fallback path was `python3-pip` plus `python3 -m pip install --user azure-cli`
 - even though the source machine was fixed, you should still verify `bwrap --unshare-net ...` on AWS because VM/kernel behavior can differ across providers and images
 - Docker was installed, but the `developer` user was not yet in the `docker` group on this box at inspection time
 - Android-related dot-directories existed, but `java`, `adb`, and `gradle` were not installed system-wide, so Android tooling is not part of the reproducible baseline yet

@@ -2,6 +2,13 @@
 
 This directory now documents the current Ubuntu developer box and provides scripts to recreate the environment on another host, including AWS EC2.
 
+Repository working copies are expected under `~/Coding`:
+
+- `~/Coding/hetzner`
+- `~/Coding/notea`
+- `~/Coding/unitc`
+- `~/Coding/work` if you use an extra scratch/work repo
+
 ## What This Captures
 
 - Base OS assumptions: Ubuntu 24.04.x LTS
@@ -9,6 +16,8 @@ This directory now documents the current Ubuntu developer box and provides scrip
 - Codex sandbox prerequisites
 - User-level shell and CLI setup
 - Git, SSH, Codex, Docker, and Railway bootstrap steps
+- Azure CLI fallback install notes
+- Telegram Codex bridge service scaffolding
 - Verification commands
 - An AWS migration playbook
 
@@ -71,6 +80,23 @@ Observed on `2026-04-02`:
 - Cloudflare (`cloudflared`)
 - Tailscale
 
+### Azure CLI Note
+
+Observed on `2026-04-03`:
+
+- `azure-cli` was not available from the configured apt repositories on this machine.
+- The working fallback is to install `python3-pip` via apt, then install `azure-cli` from PyPI.
+
+Use:
+
+```bash
+sudo apt-get install -y python3-pip
+python3 -m pip install --user azure-cli
+~/.local/bin/az version
+```
+
+If `~/.local/bin` is already on `PATH`, `az version` should work directly after opening a new shell.
+
 ### Enabled Services Worth Recreating
 
 - `docker`
@@ -86,7 +112,10 @@ Observed on `2026-04-02`:
 Run these in order on a fresh Ubuntu 24.04 host:
 
 ```bash
-cd /path/to/this/repo
+mkdir -p ~/Coding
+cd ~/Coding
+git clone <your-hetzner-repo-url> hetzner
+cd ~/Coding/hetzner
 sudo bash scripts/bootstrap_root.sh
 bash scripts/bootstrap_user.sh
 bash scripts/verify_setup.sh
@@ -104,8 +133,56 @@ bash scripts/bootstrap_user.sh
 
 - `scripts/bootstrap_root.sh`: root-level packages, repositories, services, sysctl
 - `scripts/bootstrap_user.sh`: shell, npm global path, Codex/Railway install, Git/SSH templates
+- `scripts/get_telegram_ids.sh`: resolve `TELEGRAM_CHAT_ID` and `TELEGRAM_USER_ID` from a bot token
+- `scripts/codex_telegram_wrapper.sh`: Codex launcher wrapper used for non-git workspace roots like `~/Coding`
+- `scripts/install_telegram_codex_service.sh`: install the user-level systemd unit and env template
+- `scripts/run_telegram_codex_bridge.sh`: local wrapper that launches the Telegram bridge implementation
 - `scripts/verify_setup.sh`: post-setup verification
+- `systemd/telegram-codex.service`: user-level service template for the Telegram Codex bridge
 - `docs/aws-playbook.md`: step-by-step transfer plan from this box to AWS
+
+## Telegram Helper
+
+Create your bot in Telegram with `@BotFather`, send that bot a message once, then run:
+
+```bash
+bash scripts/get_telegram_ids.sh <telegram-bot-token>
+```
+
+The script prints the `chat_id` and `user_id` values you need for the Telegram Codex bridge.
+
+## Telegram Codex Service
+
+Bootstrap now installs a user-level systemd service template for the Telegram Codex bridge.
+This repo owns the service definition and wrapper script. The actual bridge implementation is currently loaded from `~/Coding/notea/scripts/telegram-codex-bridge.mjs` by default, and the default Codex workspace root is `~/Coding`.
+
+The generated env file lives at:
+
+```bash
+~/.config/coding/telegram-codex.env
+```
+
+Recommended repository root:
+
+```bash
+~/Coding
+```
+
+After filling in `TELEGRAM_BOT_TOKEN`, start the bridge with:
+
+```bash
+systemctl --user start telegram-codex.service
+systemctl --user status telegram-codex.service
+```
+
+If `notea` is not cloned yet, do that first:
+
+```bash
+cd ~/Coding
+git clone <your-notea-repo-url> notea
+cd notea
+npm install
+```
 
 ## Codex Sandbox Notes
 
