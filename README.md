@@ -1,6 +1,6 @@
 # Hetzner Developer Machine
 
-This directory now documents the current Ubuntu developer box and provides scripts to recreate the environment on another host, including AWS EC2.
+This directory documents the Ubuntu developer box and provides scripts and templates to recreate the environment on another host, including Hetzner and AWS EC2.
 
 Repository working copies are expected under `~/Coding`:
 
@@ -15,7 +15,9 @@ Repository working copies are expected under `~/Coding`:
 - System packages and third-party apt repositories
 - Codex sandbox prerequisites
 - User-level shell and CLI setup
-- Git, SSH, Codex, Docker, and Railway bootstrap steps
+- Git, SSH, Codex, Docker, Railway, and `uv` bootstrap steps
+- cloud-init templates for first-boot machine setup
+- IPv6 helper script for Hetzner-style statically assigned IPv6
 - Azure CLI fallback install notes
 - Telegram Codex bridge service scaffolding
 - Verification commands
@@ -26,13 +28,27 @@ This repo intentionally does **not** store secrets. Do not copy:
 - `~/.codex/auth.json`
 - `~/.railway/config.json`
 - `~/.ssh/*` private keys
-- Any existing cloud, GitHub, or package registry tokens
+- any live Tailscale auth keys or Cloudflare tunnel tokens
+- any existing cloud, GitHub, or package registry tokens
 
 Re-authenticate on the target machine instead.
 
+## Compute Server Pattern
+
+For UnitC-style private compute workers, the preferred shape is:
+
+- Ubuntu 24.04 host
+- one non-root admin user such as `developer`
+- Tailscale on the host
+- the model executor bound only to `127.0.0.1`
+- `tailscale serve` exposing the local executor to the tailnet
+- Railway routing to the executor through env vars
+
+This is the pattern now proven on `noteadev`. Use the dedicated playbook in [`docs/unitc-compute-server.md`](docs/unitc-compute-server.md) when bringing up additional compute nodes.
+
 ## Current Machine Summary
 
-Observed on `2026-04-02`:
+Observed on `2026-04-02` through `2026-04-04`:
 
 - Hostname: `notea-dev`
 - OS: Ubuntu `24.04.4 LTS`
@@ -54,6 +70,21 @@ Observed on `2026-04-02`:
 - global npm CLIs:
   - `@openai/codex@0.118.0`
   - `@railway/cli@4.35.0`
+
+### Python Tooling Baseline
+
+Observed on `2026-04-04`:
+
+- `uv` was **not** installed yet on the current box.
+- This repo now installs `uv` during `scripts/bootstrap_user.sh` so future hosts have a consistent Python tool runner and package manager.
+- Prefer `uv` for Python-based helpers and one-off tools on recreated hosts.
+
+Example checks after bootstrap:
+
+```bash
+uv --version
+uv tool list
+```
 
 ### User-Level Dotfiles Observed
 
@@ -118,6 +149,12 @@ git clone <your-hetzner-repo-url> hetzner
 cd ~/Coding/hetzner
 sudo bash scripts/bootstrap_root.sh
 bash scripts/bootstrap_user.sh
+```
+
+Then open a new shell and run:
+
+```bash
+cd ~/Coding/hetzner
 bash scripts/verify_setup.sh
 ```
 
@@ -129,17 +166,56 @@ GIT_USER_EMAIL="you@example.com" \
 bash scripts/bootstrap_user.sh
 ```
 
+## Cloud-Init Templates
+
+Sanitized first-boot templates now live in `cloud-init/`.
+These are intended for new Hetzner or AWS Ubuntu hosts and must be reviewed before use.
+
+Available templates:
+
+- `cloud-init/notea-dev-cloud-init-safe-placeholders.yaml`: safe baseline with placeholder secrets
+- `cloud-init/notea-dev-cloud-init-safe-with-ipv6.yaml`: safe baseline plus placeholder IPv6 values
+- `cloud-init/notea-dev-cloud-init-noninteractive-placeholders.yaml`: non-interactive variant that auto-connects only when placeholders are replaced before first boot
+- `cloud-init/notea-dev-cloud-init-with-tailscale-cloudflare.yaml`: interactive-leaning template with manual post-install guidance
+
+Before using any template:
+
+- replace SSH key placeholders
+- replace any Tailscale or Cloudflare placeholders
+- replace hostname and server-specific IPv6 values where applicable
+- do not commit live credentials back into this repo
+
+## Hetzner IPv6 Helper
+
+For existing hosts that need manual static IPv6 netplan setup after first boot, use:
+
+```bash
+sudo bash scripts/configure_hetzner_ipv6.sh '<IPV6_ADDRESS_WITH_PREFIX>' '<IPV6_GATEWAY_LINK_LOCAL>'
+```
+
+Example:
+
+```bash
+sudo bash scripts/configure_hetzner_ipv6.sh '2a01:4f9:c013:d106::1/64' 'fe80::1'
+```
+
+The script backs up common netplan files, writes `/etc/netplan/60-hetzner-ipv6.yaml`, runs `netplan generate`, applies the config, and prints the resulting IPv6 addresses and routes.
+
 ## Files
 
 - `scripts/bootstrap_root.sh`: root-level packages, repositories, services, sysctl
-- `scripts/bootstrap_user.sh`: shell, npm global path, Codex/Railway install, Git/SSH templates
+- `scripts/bootstrap_user.sh`: shell, npm global path, Codex/Railway install, `uv` install, Git/SSH templates
+- `scripts/configure_hetzner_ipv6.sh`: apply a static Hetzner-style IPv6 netplan config
 - `scripts/get_telegram_ids.sh`: resolve `TELEGRAM_CHAT_ID` and `TELEGRAM_USER_ID` from a bot token
 - `scripts/codex_telegram_wrapper.sh`: Codex launcher wrapper used for non-git workspace roots like `~/Coding`
 - `scripts/install_telegram_codex_service.sh`: install the user-level systemd unit and env template
 - `scripts/run_telegram_codex_bridge.sh`: local wrapper that launches the Telegram bridge implementation
 - `scripts/verify_setup.sh`: post-setup verification
+- `cloud-init/*.yaml`: sanitized machine bootstrap templates for first-boot provisioning
 - `systemd/telegram-codex.service`: user-level service template for the Telegram Codex bridge
+- `systemd/unitc-external-model.service`: user-level service template for a UnitC external model executor
 - `docs/aws-playbook.md`: step-by-step transfer plan from this box to AWS
+- `docs/unitc-compute-server.md`: provider-agnostic playbook for tailnet-only compute servers used by Railway
 
 ## Telegram Helper
 

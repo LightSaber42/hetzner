@@ -1,0 +1,15 @@
+[Unit]
+Description=UnitC external model executor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Coding/unitc/backend
+EnvironmentFile=/srv/unitc-external-model/model.env
+ExecStart=%h/.venvs/unitc-external-model/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

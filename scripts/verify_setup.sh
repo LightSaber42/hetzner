@@ -4,10 +4,34 @@ set -euo pipefail
 
 check_cmd() {
   local name="$1"
-  if command -v "${name}" >/dev/null 2>&1; then
-    printf "[ok] %s -> %s\n" "${name}" "$(command -v "${name}")"
+  local resolved=""
+  if resolved="$(resolve_cmd "${name}")"; then
+    printf "[ok] %s -> %s\n" "${name}" "${resolved}"
   else
     printf "[missing] %s\n" "${name}"
+  fi
+}
+
+resolve_cmd() {
+  local name="$1"
+  if command -v "${name}" >/dev/null 2>&1; then
+    command -v "${name}"
+    return 0
+  fi
+
+  if [[ -x "${HOME}/.local/bin/${name}" ]]; then
+    printf "%s\n" "${HOME}/.local/bin/${name}"
+    return 0
+  fi
+
+  return 1
+}
+
+print_version() {
+  local name="$1"
+  local resolved=""
+  if resolved="$(resolve_cmd "${name}")"; then
+    "${resolved}" --version || true
   fi
 }
 
@@ -16,7 +40,7 @@ sed -n '1,6p' /etc/os-release
 echo
 
 echo "Commands"
-for cmd in git node npm python3 docker railway codex tmux jq curl unzip zip bwrap unshare; do
+for cmd in git node npm python3 uv docker railway codex tmux jq curl unzip zip bwrap unshare; do
   check_cmd "${cmd}"
 done
 echo
@@ -48,9 +72,10 @@ git --version || true
 node --version || true
 npm --version || true
 python3 --version || true
+print_version uv
 docker --version || true
-railway --version || true
-codex --version || true
+print_version railway
+print_version codex
 bwrap --version || true
 echo
 

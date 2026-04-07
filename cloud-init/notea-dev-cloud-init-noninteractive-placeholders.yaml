@@ -1,0 +1,149 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+package_reboot_if_required: true
+
+hostname: <HOSTNAME>
+
+users:
+  - name: developer
+    gecos: Notea Developer
+    groups: [sudo, docker]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh_authorized_keys:
+      - <SSH_PUBLIC_KEY>
+
+packages:
+  - git
+  - build-essential
+  - curl
+  - wget
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - unzip
+  - jq
+  - make
+  - htop
+  - tree
+  - tmux
+  - ufw
+  - fail2ban
+  - nginx
+
+write_files:
+  - path: /etc/sysctl.d/99-notea-dev.conf
+    permissions: '0644'
+    content: |
+      vm.swappiness=10
+
+  - path: /etc/notea-dev.env
+    permissions: '0600'
+    owner: root:root
+    content: |
+      TAILSCALE_AUTH_KEY=<TAILSCALE_AUTH_KEY>
+      CLOUDFLARE_TUNNEL_TOKEN=<CLOUDFLARE_TUNNEL_TOKEN>
+
+  - path: /usr/local/bin/notea-dev-connect-noninteractive
+    permissions: '0755'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      if [[ -f /etc/notea-dev.env ]]; then
+        # shellcheck disable=SC1091
+        . /etc/notea-dev.env
+      fi
+
+      if [[ -n "${TAILSCALE_AUTH_KEY:-}" && "${TAILSCALE_AUTH_KEY}" != "<TAILSCALE_AUTH_KEY>" ]]; then
+        echo "Configuring Tailscale..."
+        tailscale up --auth-key "${TAILSCALE_AUTH_KEY}" --ssh
+      else
+        echo "Skipping Tailscale setup: placeholder auth key still present."
+      fi
+
+      if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" && "${CLOUDFLARE_TUNNEL_TOKEN}" != "<CLOUDFLARE_TUNNEL_TOKEN>" ]]; then
+        echo "Configuring cloudflared..."
+        cloudflared service install "${CLOUDFLARE_TUNNEL_TOKEN}"
+      else
+        echo "Skipping cloudflared setup: placeholder tunnel token still present."
+      fi
+
+  - path: /usr/local/bin/notea-postinstall-hints
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -eu
+
+      echo "Next steps:"
+      echo
+      echo "1. Replace placeholder secrets in /etc/notea-dev.env if you have not done so."
+      echo
+      echo "2. Clone repositories under /home/developer/Coding"
+      echo "   cd /home/developer/Coding"
+      echo "   git clone <your-hetzner-repo-url> hetzner"
+      echo "   git clone <your-notea-repo-url> notea"
+      echo
+      echo "3. Check agents"
+      echo "   tailscale status"
+      echo "   systemctl status cloudflared"
+
+runcmd:
+  - [ufw, allow, 22/tcp]
+  - [ufw, allow, 3000/tcp]
+  - [ufw, allow, 8080/tcp]
+  - [ufw, --force, enable]
+
+  - [systemctl, enable, fail2ban]
+  - [systemctl, start, fail2ban]
+
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - bash -lc 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list'
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable docker
+  - systemctl start docker
+
+  - curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  - apt-get install -y nodejs
+  - npm install -g npm@latest
+  - npm install -g pm2
+
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - systemctl enable tailscaled
+  - systemctl start tailscaled
+
+  - install -m 0755 -d /usr/share/keyrings
+  - bash -lc 'curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | gpg --dearmor -o /usr/share/keyrings/cloudflare-main.gpg'
+  - bash -lc 'echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(. /etc/os-release && echo $VERSION_CODENAME) main" > /etc/apt/sources.list.d/cloudflared.list'
+  - apt-get update
+  - apt-get install -y cloudflared
+
+  - mkdir -p /home/developer/.ssh /home/developer/Coding
+  - chown -R developer:developer /home/developer
+
+  - bash -lc 'grep -q "alias ll=" /home/developer/.bashrc || echo "alias ll=\"ls -lah\"" >> /home/developer/.bashrc'
+  - bash -lc 'grep -q "alias dc=" /home/developer/.bashrc || echo "alias dc=\"docker compose\"" >> /home/developer/.bashrc'
+  - /usr/local/bin/notea-dev-connect-noninteractive
+
+final_message: |
+  notea-dev is ready.
+
+  Installed:
+  - Node.js 24
+  - Docker Engine + docker compose plugin
+  - Tailscale
+  - cloudflared
+  - nginx
+  - fail2ban
+
+  Secrets file:
+  /etc/notea-dev.env
+
+  Safe behavior:
+  - If placeholders remain unchanged, Tailscale/cloudflared setup is skipped.
+  - If real values are present before first boot, non-interactive network setup is attempted.

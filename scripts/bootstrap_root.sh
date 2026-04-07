@@ -81,6 +81,8 @@ apt-get install -y \
   jq \
   make \
   nginx \
+  python3-pip \
+  python3-venv \
   nodejs \
   tmux \
   tailscale \
