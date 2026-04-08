@@ -209,7 +209,10 @@ The script backs up common netplan files, writes `/etc/netplan/60-hetzner-ipv6.y
 - `scripts/get_telegram_ids.sh`: resolve `TELEGRAM_CHAT_ID` and `TELEGRAM_USER_ID` from a bot token
 - `scripts/codex_telegram_wrapper.sh`: Codex launcher wrapper used for non-git workspace roots like `~/Coding`
 - `scripts/install_telegram_codex_service.sh`: install the user-level systemd unit and env template
-- `scripts/run_telegram_codex_bridge.sh`: local wrapper that launches the Telegram bridge implementation
+- `scripts/run_telegram_codex_bridge.sh`: local wrapper that launches the Telegram bridge implementation from this repo
+- `scripts/telegram_codex_bridge.mjs`: Telegram-to-Codex bridge with resumable shared state and inbound file download support
+- `scripts/telegram_file_mcp.mjs`: MCP server that lets any Codex instance send files to the configured Telegram chat and inspect received-file inbox history
+- `scripts/resume_telegram_codex.sh`: resume the bridge conversation from another local Codex instance
 - `scripts/verify_setup.sh`: post-setup verification
 - `cloud-init/*.yaml`: sanitized machine bootstrap templates for first-boot provisioning
 - `systemd/telegram-codex.service`: user-level service template for the Telegram Codex bridge
@@ -230,7 +233,7 @@ The script prints the `chat_id` and `user_id` values you need for the Telegram C
 ## Telegram Codex Service
 
 Bootstrap now installs a user-level systemd service template for the Telegram Codex bridge.
-This repo owns the service definition and wrapper script. The actual bridge implementation is currently loaded from `~/Coding/notea/scripts/telegram-codex-bridge.mjs` by default, and the default Codex workspace root is `~/Coding`.
+This repo now owns the service definition, wrapper script, bridge implementation, MCP helper, and resume helper. The default Codex workspace root remains `~/Coding`.
 
 The generated env file lives at:
 
@@ -251,13 +254,22 @@ systemctl --user start telegram-codex.service
 systemctl --user status telegram-codex.service
 ```
 
-If `notea` is not cloned yet, do that first:
+Resume the same Telegram conversation in another local Codex instance with:
 
 ```bash
-cd ~/Coding
-git clone <your-notea-repo-url> notea
-cd notea
-npm install
+/home/developer/Coding/hetzner/scripts/resume_telegram_codex.sh
+```
+
+Telegram file behavior:
+
+- Text messages are forwarded to Codex with resumable context.
+- Incoming Telegram files are downloaded to `~/.local/state/coding/telegram-codex/inbox/<chat>-<user>/` and the saved local path is injected into the Codex prompt.
+- Bridge state is written to `~/.config/coding/telegram-codex-state-<chat>-<user>.json`, which stores the current `thread_id`, workdir, and resume command for other Codex instances.
+
+Register the MCP server once so any Codex instance on the machine can send files back to Telegram and inspect the received-file inbox:
+
+```bash
+codex mcp add telegram-file -- node /home/developer/Coding/hetzner/scripts/telegram_file_mcp.mjs
 ```
 
 ## Codex Sandbox Notes

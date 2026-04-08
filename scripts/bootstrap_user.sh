@@ -100,6 +100,8 @@ Manual follow-up:
    tailscale up
 5. Fill in ~/.config/coding/telegram-codex.env if you want the Telegram Codex bridge enabled, then start it:
    systemctl --user start telegram-codex.service
+   codex mcp add telegram-file -- node ~/Coding/hetzner/scripts/telegram_file_mcp.mjs
+   ~/Coding/hetzner/scripts/resume_telegram_codex.sh
 6. Clone or move working repos under ~/Coding:
    ~/Coding/hetzner
    ~/Coding/notea

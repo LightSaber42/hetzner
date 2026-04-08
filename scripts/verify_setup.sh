@@ -57,6 +57,24 @@ if [[ -f "${HOME}/.config/coding/telegram-codex.env" ]]; then
 else
   echo "[missing] ~/.config/coding/telegram-codex.env"
 fi
+
+if [[ -f "${HOME}/Coding/hetzner/scripts/telegram_codex_bridge.mjs" ]]; then
+  echo "[ok] ~/Coding/hetzner/scripts/telegram_codex_bridge.mjs"
+else
+  echo "[missing] ~/Coding/hetzner/scripts/telegram_codex_bridge.mjs"
+fi
+
+if [[ -f "${HOME}/Coding/hetzner/scripts/telegram_file_mcp.mjs" ]]; then
+  echo "[ok] ~/Coding/hetzner/scripts/telegram_file_mcp.mjs"
+else
+  echo "[missing] ~/Coding/hetzner/scripts/telegram_file_mcp.mjs"
+fi
+
+if [[ -x "${HOME}/Coding/hetzner/scripts/resume_telegram_codex.sh" ]]; then
+  echo "[ok] ~/Coding/hetzner/scripts/resume_telegram_codex.sh"
+else
+  echo "[missing] ~/Coding/hetzner/scripts/resume_telegram_codex.sh"
+fi
 echo
 
 echo "Workspace root"

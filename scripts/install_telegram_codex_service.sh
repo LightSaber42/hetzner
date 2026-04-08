@@ -16,6 +16,7 @@ chmod 700 "${CONFIG_DIR}"
 install -m 0644 "${SERVICE_TEMPLATE}" "${SYSTEMD_USER_DIR}/${SERVICE_NAME}"
 chmod 0755 "${REPO_ROOT}/scripts/run_telegram_codex_bridge.sh"
 chmod 0755 "${REPO_ROOT}/scripts/codex_telegram_wrapper.sh"
+chmod 0755 "${REPO_ROOT}/scripts/resume_telegram_codex.sh"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   cat >"${ENV_FILE}" <<'EOF'
@@ -24,7 +25,7 @@ TELEGRAM_CHAT_ID=
 TELEGRAM_USER_ID=
 CODEX_WORKDIR=__HOME__/Coding
 CODEX_BIN=__HOME__/Coding/hetzner/scripts/codex_telegram_wrapper.sh
-TELEGRAM_BRIDGE_SCRIPT=__HOME__/Coding/notea/scripts/telegram-codex-bridge.mjs
+TELEGRAM_BRIDGE_SCRIPT=__HOME__/Coding/hetzner/scripts/telegram_codex_bridge.mjs
 CODEX_PROGRESS_UPDATES=1
 EOF
   sed -i "s|__HOME__|${HOME_DIR}|g" "${ENV_FILE}"
@@ -48,4 +49,7 @@ Start the service with:
 
 Check status with:
   systemctl --user status ${SERVICE_NAME}
+
+Resume the Telegram Codex thread in another terminal with:
+  ${REPO_ROOT}/scripts/resume_telegram_codex.sh
 EOF
