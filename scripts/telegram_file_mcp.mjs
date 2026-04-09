@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// This MCP is registered at the machine Codex CLI level via `codex mcp add`.
+// Existing Codex sessions do not hot-load newly added MCP servers; start or
+// resume a fresh Codex process after registration to make this tool available.
+
 import process from 'node:process';
 import { readJsonLinesReverse, sendTelegramDocument, loadBridgeConfig, ensureTelegramConfig, describeError } from './telegram_bridge_support.mjs';
 

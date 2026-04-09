@@ -21,6 +21,7 @@ import {
 } from './telegram_bridge_support.mjs';
 
 const TELEGRAM_MAX = 3500;
+const BRIDGE_SESSION_SCHEMA_VERSION = 2;
 
 let config;
 let lastUpdateId = 0;
@@ -175,6 +176,7 @@ function summarizeEvent(event) {
 
 async function persistState() {
   const payload = {
+    bridge_session_schema_version: BRIDGE_SESSION_SCHEMA_VERSION,
     chat_id: config.CHAT_ID,
     user_id: config.USER_ID,
     workdir: config.WORKDIR,
@@ -201,21 +203,22 @@ async function persistState() {
 
 async function loadState() {
   const state = await readJsonFile(config.STATE_FILE);
-  if (state?.thread_id) {
+  const storedSchemaVersion = Number(state?.bridge_session_schema_version || 0);
+  const needsFreshSession = storedSchemaVersion !== BRIDGE_SESSION_SCHEMA_VERSION;
+
+  if (!needsFreshSession && state?.thread_id) {
     threadId = String(state.thread_id).trim();
   } else {
-    const session = await readJsonFile(config.SESSION_FILE);
-    if (session?.thread_id) {
-      threadId = String(session.thread_id).trim() || null;
-    } else {
-      const legacySession = await readJsonFile(config.LEGACY_SESSION_FILE);
-      threadId = String(legacySession?.thread_id || '').trim() || null;
-    }
+    threadId = null;
+    await removeFileIfExists(config.SESSION_FILE);
   }
 
   const persistedLastUpdateId = Number(state?.last_update_id || 0);
   lastUpdateId = Number.isFinite(persistedLastUpdateId) && persistedLastUpdateId > 0 ? persistedLastUpdateId : 0;
   await persistState();
+  return {
+    needsFreshSession,
+  };
 }
 
 async function resetSession() {
@@ -615,9 +618,15 @@ async function bootstrap() {
   await ensureDir(path.dirname(config.SESSION_FILE));
   await ensureDir(config.DOWNLOAD_DIR);
   log('Telegram Codex bridge starting...');
-  await loadState();
+  const stateInfo = await loadState();
   try {
     await sendMessage('Codex bridge online. Send a prompt or file to start.', undefined);
+    if (stateInfo.needsFreshSession) {
+      await sendMessage(
+        'Bridge capabilities changed. Saved Codex session was reset so new MCP tools are available on the next message.',
+        undefined,
+      );
+    }
   } catch (error) {
     err(`Startup notification failed: ${describeError(error)}`);
   }

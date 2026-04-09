@@ -269,8 +269,54 @@ Telegram file behavior:
 Register the MCP server once so any Codex instance on the machine can send files back to Telegram and inspect the received-file inbox:
 
 ```bash
-codex mcp add telegram-file -- node /home/developer/Coding/hetzner/scripts/telegram_file_mcp.mjs
+codex mcp add telegram-file -- /usr/bin/node /home/developer/Coding/hetzner/scripts/telegram_file_mcp.mjs
 ```
+
+Then add a longer startup timeout in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.telegram-file]
+command = "/usr/bin/node"
+args = ["/home/developer/Coding/hetzner/scripts/telegram_file_mcp.mjs"]
+startup_timeout_sec = 60
+```
+
+If the bridge already had a saved Codex thread before the MCP server was added, restart the bridge once. The current bridge implementation will reset the saved thread automatically when its capability schema changes so new MCP tools are available on the next Telegram message.
+
+Confirm that the local Codex CLI registry can see it:
+
+```bash
+codex mcp list
+```
+
+Expected entry:
+
+```text
+telegram-file  node  /home/developer/Coding/hetzner/scripts/telegram_file_mcp.mjs
+```
+
+Important runtime note:
+
+- `codex mcp add ...` updates the machine-level Codex CLI config, not an already-running Codex session.
+- A Codex session only sees the MCP servers that were available when that session started.
+- If you add `telegram-file` while a Codex session is already running, that live session will not gain the tool.
+- Start a fresh Codex instance, or resume the Telegram thread in a new process, after registering the MCP.
+
+Recommended sequence:
+
+```bash
+codex mcp add telegram-file -- node /home/developer/Coding/hetzner/scripts/telegram_file_mcp.mjs
+codex mcp list
+systemctl --user restart telegram-codex.service
+/home/developer/Coding/hetzner/scripts/resume_telegram_codex.sh
+```
+
+What each step does:
+
+- `codex mcp add ...`: registers the Telegram file MCP in the local Codex CLI config.
+- `codex mcp list`: verifies the registration is visible to fresh Codex processes.
+- `systemctl --user restart telegram-codex.service`: restarts the Telegram bridge so new prompts use the updated machine config.
+- `resume_telegram_codex.sh`: opens the same Telegram conversation in a new local Codex process that can now see the MCP.
 
 ## Codex Sandbox Notes
 
