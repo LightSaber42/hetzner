@@ -1,5 +1,5 @@
 [Unit]
-Description=UnitC external model executor (CBC exact_sos2)
+Description=UnitC external model executor (CBC fast_linear)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/Coding/unitc/backend
 EnvironmentFile=/srv/unitc-external-model/model.env
-ExecStart=%h/.venvs/unitc-external-model/bin/python -m app.serve --host 127.0.0.1 --port 18001 --model-id exact_sos2
+ExecStart=%h/.venvs/unitc-external-model/bin/python -m app.serve --host 127.0.0.1 --port 18002 --model-id fast_linear --model-label "Fast Linear (CBC)"
 Restart=always
 RestartSec=5
 

@@ -21,7 +21,7 @@ import {
 } from './telegram_bridge_support.mjs';
 
 const TELEGRAM_MAX = 3500;
-const BRIDGE_SESSION_SCHEMA_VERSION = 2;
+const BRIDGE_SESSION_SCHEMA_VERSION = 3;
 
 let config;
 let lastUpdateId = 0;
@@ -34,6 +34,12 @@ let stopRequested = false;
 let queuedMessages = 0;
 let activePromptStartedAt = 0;
 let activePromptPreview = '';
+let capabilityState = {
+  fingerprint: '',
+  mcpServerNames: [],
+  telegramFileMcpAvailable: false,
+};
+let threadCapabilityFingerprint = '';
 
 function isoNow() {
   return new Date().toISOString();
@@ -45,6 +51,32 @@ function log(message) {
 
 function err(message) {
   process.stderr.write(`[${isoNow()}] ${message}\n`);
+}
+
+function getDefaultCodexModel() {
+  return String(config?.DEFAULT_CODEX_MODEL || '').trim();
+}
+
+function getCodexModelOverride() {
+  return String(config?.CODEX_MODEL_OVERRIDE || '').trim();
+}
+
+function getEffectiveCodexModel() {
+  return getCodexModelOverride() || getDefaultCodexModel();
+}
+
+function getCodexModelSource() {
+  if (getCodexModelOverride()) {
+    return 'runtime_override';
+  }
+  if (getDefaultCodexModel()) {
+    return 'env';
+  }
+  return 'auto';
+}
+
+function formatCodexModelForDisplay(model) {
+  return model ? `"${model}"` : 'auto';
 }
 
 function splitMessage(text) {
@@ -61,9 +93,82 @@ function splitMessage(text) {
   return parts;
 }
 
+function parseMcpServerNames(rawOutput) {
+  const names = [];
+  for (const rawLine of String(rawOutput || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('WARNING:') || line.startsWith('Name ')) {
+      continue;
+    }
+    const match = line.match(/^([^\s]+)/);
+    if (match?.[1]) {
+      names.push(match[1]);
+    }
+  }
+  return Array.from(new Set(names)).sort();
+}
+
+async function detectCapabilityState() {
+  let stdout = '';
+  let stderr = '';
+
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn(config.CODEX_BIN, ['mcp', 'list'], {
+        cwd: config.WORKDIR,
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`Codex MCP listing failed with exit ${code}. stderr: ${stderr || '(none)'}`));
+      });
+    });
+  } catch (error) {
+    err(`Capability detection failed: ${describeError(error)}`);
+    return null;
+  }
+
+  const mcpServerNames = parseMcpServerNames(stdout);
+  return {
+    fingerprint: JSON.stringify(mcpServerNames),
+    mcpServerNames,
+    telegramFileMcpAvailable: mcpServerNames.includes('telegram-file'),
+  };
+}
+
 function buildTelegramPrompt(userPrompt) {
   const instructions = String(config.CODEX_TELEGRAM_INSTRUCTIONS || '').trim();
-  return instructions ? `${instructions}\n\nUser message:\n${userPrompt}` : userPrompt;
+  const parts = [];
+
+  if (instructions) {
+    parts.push(instructions);
+  }
+
+  if (capabilityState.telegramFileMcpAvailable) {
+    parts.push(
+      [
+        'Telegram bridge capability note:',
+        '- The `telegram-file` MCP is available in this Codex session.',
+        '- If the user asks you to send a local file back to Telegram, call `telegram_send_file` with the absolute path and optional caption.',
+        '- Do not claim local file upload is unavailable when this tool is present.',
+      ].join('\n'),
+    );
+  }
+
+  parts.push(`User message:\n${userPrompt}`);
+  return parts.join('\n\n');
 }
 
 function extractCommandText(value) {
@@ -177,6 +282,13 @@ function summarizeEvent(event) {
 async function persistState() {
   const payload = {
     bridge_session_schema_version: BRIDGE_SESSION_SCHEMA_VERSION,
+    bridge_capability_fingerprint: capabilityState.fingerprint || null,
+    thread_capability_fingerprint: threadCapabilityFingerprint || null,
+    telegram_file_mcp_available: capabilityState.telegramFileMcpAvailable,
+    codex_model: getEffectiveCodexModel() || null,
+    codex_model_source: getCodexModelSource(),
+    codex_model_override: getCodexModelOverride() || null,
+    default_codex_model: getDefaultCodexModel() || null,
     chat_id: config.CHAT_ID,
     user_id: config.USER_ID,
     workdir: config.WORKDIR,
@@ -203,13 +315,26 @@ async function persistState() {
 
 async function loadState() {
   const state = await readJsonFile(config.STATE_FILE);
+  if (Object.prototype.hasOwnProperty.call(state || {}, 'codex_model_override')) {
+    config.CODEX_MODEL_OVERRIDE = String(state?.codex_model_override || '').trim();
+  }
+  const hadSavedThread = Boolean(state?.thread_id);
   const storedSchemaVersion = Number(state?.bridge_session_schema_version || 0);
-  const needsFreshSession = storedSchemaVersion !== BRIDGE_SESSION_SCHEMA_VERSION;
+  const storedThreadCapabilityFingerprint = String(state?.thread_capability_fingerprint || '').trim();
+  const currentCapabilityFingerprint = String(capabilityState.fingerprint || '').trim();
+  const needsFreshSession =
+    hadSavedThread &&
+    (storedSchemaVersion !== BRIDGE_SESSION_SCHEMA_VERSION ||
+      Boolean(currentCapabilityFingerprint) &&
+      storedThreadCapabilityFingerprint !== currentCapabilityFingerprint);
 
   if (!needsFreshSession && state?.thread_id) {
     threadId = String(state.thread_id).trim();
+    threadCapabilityFingerprint =
+      storedThreadCapabilityFingerprint || currentCapabilityFingerprint || '';
   } else {
     threadId = null;
+    threadCapabilityFingerprint = '';
     await removeFileIfExists(config.SESSION_FILE);
   }
 
@@ -223,8 +348,43 @@ async function loadState() {
 
 async function resetSession() {
   threadId = null;
+  threadCapabilityFingerprint = '';
   await removeFileIfExists(config.SESSION_FILE);
   await persistState();
+}
+
+async function refreshCapabilityState() {
+  const nextCapabilityState = await detectCapabilityState();
+  if (!nextCapabilityState) {
+    return capabilityState;
+  }
+  capabilityState = nextCapabilityState;
+  return capabilityState;
+}
+
+async function ensureThreadMatchesCapabilities(replyToMessageId) {
+  await refreshCapabilityState();
+  const currentCapabilityFingerprint = String(capabilityState.fingerprint || '').trim();
+  if (!threadId || !currentCapabilityFingerprint) {
+    return false;
+  }
+  if (threadCapabilityFingerprint === currentCapabilityFingerprint) {
+    return false;
+  }
+
+  const previousThreadId = threadId;
+  const previousThreadCapabilityFingerprint = threadCapabilityFingerprint || '(none)';
+  await resetSession();
+  log(
+    `Session reset after capability change: thread_id=${previousThreadId.slice(0, 8)}... old_fingerprint=${previousThreadCapabilityFingerprint} new_fingerprint=${currentCapabilityFingerprint}`,
+  );
+  await sendMessage(
+    capabilityState.telegramFileMcpAvailable
+      ? 'Bridge capabilities changed. Reset the saved Codex session so the refreshed MCP tools, including telegram-file, apply to this message.'
+      : 'Bridge capabilities changed. Reset the saved Codex session so the refreshed MCP tool set applies to this message.',
+    replyToMessageId,
+  );
+  return true;
 }
 
 async function sendMessage(text, replyToMessageId) {
@@ -235,21 +395,27 @@ async function runCodex(prompt) {
   const outFile = path.join('/tmp', `codex-telegram-last-${randomUUID()}.txt`);
   let currentThreadId = null;
   const effectivePrompt = buildTelegramPrompt(prompt);
+  const selectedModel = getEffectiveCodexModel();
 
   const args = [];
   if (config.CODEX_SEARCH) {
     args.push('--search');
   }
   if (threadId) {
-    args.push('exec', 'resume', '--json', threadId, effectivePrompt, '--output-last-message', outFile);
+    args.push('exec', 'resume', '--json');
   } else {
-    args.push('exec', '--json', effectivePrompt, '--sandbox', 'workspace-write', '--output-last-message', outFile);
+    args.push('exec', '--json', '--sandbox', 'workspace-write');
   }
   if (config.CODEX_BYPASS_SANDBOX) {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   }
-  if (config.CODEX_MODEL && !threadId) {
-    args.push('--model', config.CODEX_MODEL);
+  if (selectedModel) {
+    args.push('--model', selectedModel);
+  }
+  if (threadId) {
+    args.push(threadId, effectivePrompt, '--output-last-message', outFile);
+  } else {
+    args.push(effectivePrompt, '--output-last-message', outFile);
   }
 
   let stdout = '';
@@ -339,7 +505,9 @@ function helpText() {
   return [
     'Telegram Codex bridge is online.',
     'Send text or a file and it will be forwarded to Codex with resumable context.',
-    'Commands: /start, /help, /status, /session, /new, /stop',
+    'Commands: /start, /help, /status, /session, /new, /model, /stop',
+    '/urgentstop is accepted as an alias for /stop.',
+    'Use /model to show the active model, /model <name> to set it, or /model default to clear the runtime override.',
     'Incoming Telegram files are saved locally and included in the Codex prompt.',
   ].join('\n');
 }
@@ -351,17 +519,95 @@ function getActiveStatusText() {
   const activeText = busy
     ? `busy=yes elapsed=${elapsedSeconds}s active="${activePromptPreview || '(unknown)'}"`
     : 'busy=no';
-  return `Bridge is online. ${activeText} queued=${queuedMessages} session=${threadId || 'none'}`;
+  return `Bridge is online. ${activeText} queued=${queuedMessages} session=${threadId || 'none'} model=${getEffectiveCodexModel() || 'auto'} source=${getCodexModelSource()}`;
 }
 
 function getSessionText() {
   return [
     `thread_id=${threadId || 'none'}`,
+    `codex_model=${getEffectiveCodexModel() || 'auto'}`,
+    `codex_model_source=${getCodexModelSource()}`,
+    `codex_model_override=${getCodexModelOverride() || 'none'}`,
+    `default_codex_model=${getDefaultCodexModel() || 'auto'}`,
+    `telegram_file_mcp=${capabilityState.telegramFileMcpAvailable ? 'enabled' : 'disabled'}`,
+    `thread_capability_fingerprint=${threadCapabilityFingerprint || 'none'}`,
     `state_file=${config.STATE_FILE}`,
     `session_file=${config.SESSION_FILE}`,
     `download_dir=${config.DOWNLOAD_DIR}`,
     `resume_command=${buildResumeCommand(config, threadId)}`,
   ].join('\n');
+}
+
+function getModelText() {
+  return [
+    `codex_model=${getEffectiveCodexModel() || 'auto'}`,
+    `codex_model_source=${getCodexModelSource()}`,
+    `codex_model_override=${getCodexModelOverride() || 'none'}`,
+    `default_codex_model=${getDefaultCodexModel() || 'auto'}`,
+    'Usage: /model <name> to set a runtime override.',
+    'Usage: /model default to clear the runtime override.',
+  ].join('\n');
+}
+
+function parseModelCommand(text) {
+  const match = String(text || '')
+    .trim()
+    .match(/^\/model(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]+))?$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    rawArgument: String(match[1] || '').trim(),
+  };
+}
+
+async function handleModelCommand(rawArgument, msgId) {
+  if (!rawArgument) {
+    await sendMessage(getModelText(), msgId);
+    return;
+  }
+
+  const nextValue = String(rawArgument || '').trim();
+  if (!nextValue) {
+    await sendMessage(getModelText(), msgId);
+    return;
+  }
+
+  const normalized = nextValue.toLowerCase();
+  if (normalized === 'default' || normalized === 'auto' || normalized === 'clear' || normalized === 'reset') {
+    const hadOverride = Boolean(getCodexModelOverride());
+    config.CODEX_MODEL_OVERRIDE = '';
+    await persistState();
+
+    if (hadOverride) {
+      const effectiveModel = getEffectiveCodexModel();
+      await sendMessage(
+        effectiveModel
+          ? `Cleared the runtime model override. Future Codex runs will use ${formatCodexModelForDisplay(effectiveModel)} from the env configuration. Send /new if you want a fresh thread under that model.`
+          : 'Cleared the runtime model override. Future Codex runs will use Codex automatic model selection. Send /new if you want a fresh thread under that selection.',
+        msgId,
+      );
+      return;
+    }
+
+    await sendMessage('No runtime model override is set. Use /model <name> to choose one.', msgId);
+    return;
+  }
+
+  if (nextValue === getCodexModelOverride()) {
+    await sendMessage(
+      `The runtime model override is already ${formatCodexModelForDisplay(nextValue)}. Send /new if you want a fresh thread under that model.`,
+      msgId,
+    );
+    return;
+  }
+
+  config.CODEX_MODEL_OVERRIDE = nextValue;
+  await persistState();
+  await sendMessage(
+    `Set the runtime model override to ${formatCodexModelForDisplay(nextValue)}. Future Codex runs, including resumed sessions, will use it. Send /new if you want a fresh thread under the new model.`,
+    msgId,
+  );
 }
 
 async function stopActiveCodexRun(msgId) {
@@ -429,6 +675,7 @@ async function handleIncomingMessage(message) {
   const msgId = message.message_id;
   const text = String(message.text || '').trim();
   const from = message.from?.username ? `@${message.from.username}` : 'user';
+  const modelCommand = parseModelCommand(text);
 
   if (text === '/start' || text === '/help') {
     await sendMessage(helpText(), msgId);
@@ -445,6 +692,10 @@ async function handleIncomingMessage(message) {
   if (text === '/new') {
     await resetSession();
     await sendMessage('Started a new Codex session. Previous context cleared.', msgId);
+    return;
+  }
+  if (modelCommand) {
+    await handleModelCommand(modelCommand.rawArgument, msgId);
     return;
   }
 
@@ -473,6 +724,8 @@ async function handleIncomingMessage(message) {
   if (!prompt) {
     return;
   }
+
+  await ensureThreadMatchesCapabilities(msgId);
 
   busy = true;
   activePromptStartedAt = Date.now();
@@ -521,6 +774,9 @@ async function handleIncomingMessage(message) {
     if (result.threadId && result.threadId !== threadId) {
       threadId = result.threadId;
       log(`Session updated: thread_id=${threadId}`);
+    }
+    if (result.threadId) {
+      threadCapabilityFingerprint = capabilityState.fingerprint || threadCapabilityFingerprint;
     }
     await persistState();
 
@@ -613,17 +869,22 @@ async function pollLoop() {
 
 async function bootstrap() {
   config = await loadBridgeConfig();
+  config.DEFAULT_CODEX_MODEL = String(config.CODEX_MODEL || '').trim();
+  config.CODEX_MODEL_OVERRIDE = '';
   ensureTelegramConfig(config);
   await ensureDir(path.dirname(config.STATE_FILE));
   await ensureDir(path.dirname(config.SESSION_FILE));
   await ensureDir(config.DOWNLOAD_DIR);
+  await refreshCapabilityState();
   log('Telegram Codex bridge starting...');
   const stateInfo = await loadState();
   try {
     await sendMessage('Codex bridge online. Send a prompt or file to start.', undefined);
     if (stateInfo.needsFreshSession) {
       await sendMessage(
-        'Bridge capabilities changed. Saved Codex session was reset so new MCP tools are available on the next message.',
+        capabilityState.telegramFileMcpAvailable
+          ? 'Bridge capabilities changed. Saved Codex session was reset so refreshed MCP tools, including telegram-file, are available on the next message.'
+          : 'Bridge capabilities changed. Saved Codex session was reset so refreshed MCP tools are available on the next message.',
         undefined,
       );
     }

@@ -116,3 +116,19 @@ echo
 echo "User service"
 systemctl --user is-enabled telegram-codex.service 2>/dev/null || true
 systemctl --user is-active telegram-codex.service 2>/dev/null || true
+echo
+
+echo "Bridge Codex MCP"
+if [[ -x "${HOME}/Coding/hetzner/scripts/codex_telegram_wrapper.sh" ]] && "${HOME}/Coding/hetzner/scripts/codex_telegram_wrapper.sh" mcp list 2>/dev/null | grep -Eq '^telegram-file[[:space:]]'; then
+  echo "[ok] telegram-file MCP visible via codex_telegram_wrapper.sh"
+else
+  echo "[missing] telegram-file MCP visible via codex_telegram_wrapper.sh"
+fi
+echo
+
+echo "Global Codex MCP (optional)"
+if command -v codex >/dev/null 2>&1 && codex mcp list 2>/dev/null | grep -Eq '^telegram-file[[:space:]]'; then
+  echo "[ok] telegram-file MCP registered globally"
+else
+  echo "[info] telegram-file MCP not registered globally"
+fi

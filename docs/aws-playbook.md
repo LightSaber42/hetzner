@@ -197,12 +197,13 @@ Observed here:
 - Node comes from NodeSource `node_24.x`
 - Docker comes from Docker's apt repo
 - `cloudflared` and `tailscale` are installed from vendor repos
-- `bubblewrap` and `kernel.apparmor_restrict_unprivileged_userns=0` are required for Codex sandboxing on Ubuntu
-- `azure-cli` was not available from the configured apt repositories on `2026-04-03`; the fallback path was `python3-pip` plus `python3 -m pip install --user azure-cli`
-- even though the source machine was fixed, you should still verify `bwrap --unshare-net ...` on AWS because VM/kernel behavior can differ across providers and images
-- Docker was installed, but the `developer` user was not yet in the `docker` group on this box at inspection time
+- `uv` is part of the current baseline and is installed by `scripts/bootstrap_user.sh`
+- `bubblewrap` and `kernel.apparmor_restrict_unprivileged_userns=0` are required for Codex sandboxing on Ubuntu; both `unshare --user --map-root-user /bin/true` and `bwrap --unshare-net ...` succeeded on the source host on `2026-04-24`
+- `az` is not installed on the source machine; the last known working install path observed on `2026-04-03` was `python3-pip` plus `python3 -m pip install --user azure-cli`
+- even when the source machine is healthy, still verify `bwrap --unshare-net ...` on AWS because VM/kernel behavior can differ across providers and images
+- the `docker` group entry includes `developer`, but Docker access should still be verified after a fresh login because session state and socket permissions can differ during bootstrap
 - Android-related dot-directories existed, but `java`, `adb`, and `gradle` were not installed system-wide, so Android tooling is not part of the reproducible baseline yet
-- `~/.tmux.conf` only enabled mouse mode, which is included in `scripts/bootstrap_user.sh`
+- `~/.tmux.conf` now enables mouse mode and remaps the prefix to `C-a`
 
 ## What Not To Migrate Blindly
 

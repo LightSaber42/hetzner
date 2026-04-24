@@ -38,7 +38,7 @@ write_files:
     content: |
       vm.swappiness=10
 
-  - path: /etc/netplan/60-notea-ipv6.yaml
+  - path: /etc/netplan/60-hetzner-ipv6.yaml
     permissions: '0644'
     owner: root:root
     content: |

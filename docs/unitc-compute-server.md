@@ -12,6 +12,8 @@ Use:
 - one non-root admin user, preferably `developer`
 - Tailscale on the host
 - the UnitC backend running host-native in a dedicated Python venv
+- one user service per bound model
+- a shared runtime env file at `/srv/unitc-external-model/model.env`
 - local bind only on `127.0.0.1`
 - `tailscale serve` for tailnet-only ingress
 - Railway env vars to select the external model endpoint and API key
@@ -36,6 +38,24 @@ Only add a Tailscale exit node if the compute host itself must call an IPv4-only
 ### AWS
 
 AWS works the same way for this pattern. The main difference is provisioning, not the runtime architecture.
+
+## Ownership Boundary
+
+This repo owns the host bootstrap assets, service templates, and reusable compute-host playbook.
+Keep app-specific remote deploy helpers in the `unitc` repo because they operate on application branches and runtime code, not on machine bootstrap state.
+
+## Current `noteadev` Reference Layout
+
+The live `noteadev` host currently uses:
+
+- app working dir: `~/Coding/unitc/backend`
+- venv: `~/.venvs/unitc-external-model`
+- shared env file: `/srv/unitc-external-model/model.env`
+- `unitc-external-model.service`: `127.0.0.1:18001` -> `exact_sos2`
+- `unitc-external-model-fast-linear.service`: `127.0.0.1:18002` -> `fast_linear`
+- `unitc-external-model-highs.service`: `127.0.0.1:18003` -> `highs_piecewise_milp`
+- tailnet URL: `http://notea-dev-hetzner.tailcd5aec.ts.net/`
+- Railway-facing solve endpoint: `http://notea-dev-hetzner.tailcd5aec.ts.net/solve/external`
 
 ## Phase 1: Bootstrap The Host
 
@@ -95,26 +115,42 @@ Notes:
 - `EXTERNAL_MODEL_API_KEY` is still required and should match Railway.
 - keep this env file off git.
 
-## Phase 3: Install The User Service
+## Phase 3: Install The User Services
 
-Install the systemd unit from [`systemd/unitc-external-model.service`](../systemd/unitc-external-model.service):
+This repo ships three service templates:
+
+- [`systemd/unitc-external-model.service`](../systemd/unitc-external-model.service): `exact_sos2` on `18001`
+- [`systemd/unitc-external-model-fast-linear.service`](../systemd/unitc-external-model-fast-linear.service): `fast_linear` on `18002`
+- [`systemd/unitc-external-model-highs.service`](../systemd/unitc-external-model-highs.service): `highs_piecewise_milp` on `18003`
+
+Install them into `~/.config/systemd/user/`:
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp ~/Coding/hetzner/systemd/unitc-external-model.service ~/.config/systemd/user/unitc-external-model.service
+cp ~/Coding/hetzner/systemd/unitc-external-model-fast-linear.service ~/.config/systemd/user/unitc-external-model-fast-linear.service
+cp ~/Coding/hetzner/systemd/unitc-external-model-highs.service ~/.config/systemd/user/unitc-external-model-highs.service
 systemctl --user daemon-reload
 systemctl --user enable --now unitc-external-model.service
+systemctl --user enable --now unitc-external-model-fast-linear.service
+systemctl --user enable --now unitc-external-model-highs.service
 systemctl --user status unitc-external-model.service
+systemctl --user status unitc-external-model-fast-linear.service
+systemctl --user status unitc-external-model-highs.service
 ```
 
-Expected bind:
+Expected binds:
 
-- `127.0.0.1:18001`
+- `127.0.0.1:18001` -> `exact_sos2`
+- `127.0.0.1:18002` -> `fast_linear`
+- `127.0.0.1:18003` -> `highs_piecewise_milp`
 
 Quick local validation:
 
 ```bash
 curl -sf http://127.0.0.1:18001/healthz
+curl -sf http://127.0.0.1:18002/healthz
+curl -sf http://127.0.0.1:18003/healthz
 ```
 
 ## Phase 4: Expose It To The Tailnet
@@ -129,6 +165,8 @@ Expose the local backend with Tailscale Serve:
 
 ```bash
 tailscale serve --bg --http=80 http://127.0.0.1:18001
+tailscale serve --bg --http=18002 http://127.0.0.1:18002
+tailscale serve --bg --http=18003 http://127.0.0.1:18003
 tailscale serve status
 ```
 
@@ -148,7 +186,14 @@ Validation from another tailnet client:
 
 ```bash
 curl -sf http://<hostname>.<tailnet>.ts.net/healthz
+curl -sf http://<hostname>.<tailnet>.ts.net:18002/healthz
+curl -sf http://<hostname>.<tailnet>.ts.net:18003/healthz
 ```
+
+Notes:
+
+- The `80 -> 18001` mapping is enough for the primary `/solve/external` endpoint.
+- The `18002` and `18003` listeners are useful when you want direct health checks or per-port access to the additional bound-model services.
 
 ## Phase 5: Wire Railway To The Compute Host
 
@@ -206,6 +251,8 @@ sudo tailscale set --exit-node=<stable-exit-node-name> --exit-node-allow-lan-acc
 - venv created at `~/.venvs/unitc-external-model`
 - runtime env file created at `/srv/unitc-external-model/model.env`
 - `unitc-external-model.service` enabled and healthy
+- optional `unitc-external-model-fast-linear.service` enabled if you need the fast CBC model
+- optional `unitc-external-model-highs.service` enabled if you need the HiGHS model
 - `tailscale serve status` shows the local proxy
 - Railway backend vars set to the tailnet URL and shared API key
 - Railway staging or production can complete `/solve/external` successfully

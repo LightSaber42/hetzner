@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-// This MCP is registered at the machine Codex CLI level via `codex mcp add`.
+// The Telegram bridge wrapper injects this MCP with `-c mcp_servers.telegram-file...`
+// for bridge and resume sessions. `codex mcp add` is only needed if you want
+// standalone Codex sessions outside that wrapper to use the same tool.
 // Existing Codex sessions do not hot-load newly added MCP servers; start or
-// resume a fresh Codex process after registration to make this tool available.
+// resume a fresh Codex process after changing global registration.
 
 import process from 'node:process';
 import { readJsonLinesReverse, sendTelegramDocument, loadBridgeConfig, ensureTelegramConfig, describeError } from './telegram_bridge_support.mjs';
